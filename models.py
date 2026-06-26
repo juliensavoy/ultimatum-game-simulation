@@ -6,11 +6,28 @@ from typing import Optional
 
 import numpy as np
 
-# --- Shared game parameters (adjust these when presenting to teammates) ---
+# --- Shared game parameters ---
 
 TOTAL_PIE = 100.0  # Total surplus split between players A and B
 DELTA = 0.8        # Per-round discount factor (pie shrinks by 20% each rejection)
 MAX_ROUNDS = 3     # Finite horizon: A proposes in odd rounds, B in even rounds
+
+# --- Calibrated CGT parameter sets (from calibrate.py) ---
+
+# Fitted to Classical GT: CGT reproduces the rational equilibrium (always Round 1).
+# Key driver: very low RT (almost no noise) → Boltzmann distribution collapses to
+# the deterministic "always accept" outcome.
+CGT_CLASSICAL_PARAMS = {
+    "rt": 0.1, "epsilon": 0.5, "gamma_y": 3.0, "gamma_n": 1.0,
+    "offer_fraction": 0.40, "delta": 0.4,
+}
+
+# Fitted to Ochs & Roth (1989): CGT reproduces real lab behaviour (~87% R1, ~10% R2).
+# Higher RT introduces noise that allows occasional rejection and late agreement.
+CGT_EMPIRICAL_PARAMS = {
+    "rt": 1.5, "epsilon": 2.0, "gamma_y": 3.0, "gamma_n": 1.0,
+    "offer_fraction": 0.43, "delta": 0.8,
+}
 
 
 @dataclass

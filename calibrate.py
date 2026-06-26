@@ -1,133 +1,129 @@
 """
-Calibrate CGT (simulate_chemical) parameters to reproduce
-Ochs & Roth (1989) experimental round distributions.
+Calibrate CGT (simulate_chemical) parameters against two targets:
 
-Empirical targets come from 3-period symmetric discount-factor cells
-(Cells 5 and 7 combined, n = 190 bargaining games):
+  1. CLASSICAL fit — CGT reproduces the rational equilibrium:
+       game always ends in Round 1, acceptance rate ~100%.
+       Shows that CGT can recover the theoretical prediction.
 
-  Cell 5: delta1 = delta2 = 0.4, T = 3 (n = 100 games)
-  Cell 7: delta1 = delta2 = 0.6, T = 3 (n =  90 games)
+  2. EMPIRICAL fit — CGT reproduces Ochs & Roth (1989) lab data:
+       3-period symmetric discount-factor cells (Cells 5+7, n=190):
+         Round 1: 86.8%  |  Round 2: 8.4%  |  Round 3: 4.7%  |  acc: 97.4%
+       Shows that CGT can match real human bargaining behaviour.
 
-  Round 1 acceptance : 165/190 = 86.8%
-  Round 2 acceptance :  16/190 =  8.4%
-  Round 3 (agree)    :   4/190 =  2.1%
-  Disagreement       :   5/190 =  2.6%  (game ends with no deal)
-  Overall acceptance : 185/190 = 97.4%
-
-Observed proposer behaviour: first-period offers cluster at 45-50% of the pie;
-we use offer_fraction = 0.43 (mean observed first offer ~ 43% to the responder).
-
-NOTE on discount factor: the paper's experiment used delta = 0.4 or 0.6, not
-the delta = 0.8 default in models.py. The grid search includes both values so
-we can see which produces the best fit.
+The two best-fit parameter sets are printed at the end and can be copied
+directly into models.py (CGT_CLASSICAL_PARAMS / CGT_EMPIRICAL_PARAMS).
 """
 
 from __future__ import annotations
 
 import itertools
 from collections import Counter
+from functools import partial
 
 from models import simulate_chemical
 
-# ------------------------------------------------------------------
-# Empirical targets  (Ochs & Roth 1989, Cells 5 + 7 combined)
-# ------------------------------------------------------------------
+# ── Calibration targets ────────────────────────────────────────────────────
+
 TARGETS = {
-    "round_dist": {1: 0.868, 2: 0.084, 3: 0.047},   # fraction ending per round
-    "acceptance_rate": 0.974,
+    "classical": {
+        "label": "Classical GT (Round 1 always)",
+        "round_dist": {1: 1.0, 2: 0.0, 3: 0.0},
+        "acceptance_rate": 1.0,
+    },
+    "empirical": {
+        "label": "Ochs & Roth (1989) lab data",
+        "round_dist": {1: 0.868, 2: 0.084, 3: 0.047},
+        "acceptance_rate": 0.974,
+    },
 }
 
-N_TRIALS = 3_000   # Monte Carlo trials per parameter combination
+N_TRIALS = 3_000
 MAX_ROUNDS = 3
 
+# ── Parameter grid ─────────────────────────────────────────────────────────
 
-def _run(rt, epsilon, gamma_y, gamma_n, offer_fraction, delta):
-    """Run one trial with specific CGT parameters."""
-    return simulate_chemical(
-        max_rounds=MAX_ROUNDS,
-        delta=delta,
-        rt=rt,
-        epsilon=epsilon,
-        gamma_y=gamma_y,
-        gamma_n=gamma_n,
-        offer_fraction=offer_fraction,
-    )
+GRID = {
+    "rt":             [0.1, 0.3, 0.5, 0.8, 1.0, 1.5],
+    "epsilon":        [0.5, 1.0, 2.0, 3.0, 5.0],
+    "gamma_y":        [3.0, 5.0, 7.0, 9.0],
+    "gamma_n":        [1.0, 2.0, 3.0, 4.0],
+    "offer_fraction": [0.40, 0.43, 0.45],
+    "delta":          [0.4, 0.6, 0.8],
+}
 
 
-def score(rt, epsilon, gamma_y, gamma_n, offer_fraction, delta, n=N_TRIALS):
-    """
-    Simulate n trials and return MSE vs. empirical targets.
-    Lower MSE = better fit.
-    """
-    results = [_run(rt, epsilon, gamma_y, gamma_n, offer_fraction, delta) for _ in range(n)]
+# ── Core helpers ───────────────────────────────────────────────────────────
 
+def _score(rt, epsilon, gamma_y, gamma_n, offer_fraction, delta, target):
+    results = [
+        simulate_chemical(
+            max_rounds=MAX_ROUNDS,
+            delta=delta,
+            rt=rt,
+            epsilon=epsilon,
+            gamma_y=gamma_y,
+            gamma_n=gamma_n,
+            offer_fraction=offer_fraction,
+        )
+        for _ in range(N_TRIALS)
+    ]
     counts = Counter(r.round_ended for r in results)
-    sim_dist = {r: counts[r] / n for r in range(1, MAX_ROUNDS + 1)}
-    sim_acc = sum(1 for r in results if r.accepted) / n
+    sim_dist = {r: counts[r] / N_TRIALS for r in range(1, MAX_ROUNDS + 1)}
+    sim_acc = sum(1 for r in results if r.accepted) / N_TRIALS
 
-    # Penalise deviations in round fractions and acceptance rate equally
     mse = sum(
-        (sim_dist.get(r, 0.0) - TARGETS["round_dist"].get(r, 0.0)) ** 2
+        (sim_dist.get(r, 0.0) - target["round_dist"].get(r, 0.0)) ** 2
         for r in range(1, MAX_ROUNDS + 1)
     )
-    mse += (sim_acc - TARGETS["acceptance_rate"]) ** 2
-
+    mse += (sim_acc - target["acceptance_rate"]) ** 2
     return mse, sim_dist, sim_acc
 
 
-def grid_search():
-    """Search over a discrete parameter grid; return results sorted by MSE."""
+def _search(target_key: str) -> list:
+    target = TARGETS[target_key]
+    combos = list(itertools.product(*GRID.values()))
+    keys = list(GRID.keys())
 
-    # Parameter grid (each axis represents one CGT knob)
-    grid = {
-        "rt":             [0.3, 0.5, 0.8, 1.0, 1.5],      # thermal noise
-        "epsilon":        [0.5, 1.0, 2.0, 3.0],            # cooperative bias
-        "gamma_y":        [3.0, 5.0, 7.0, 9.0],            # acceptance gain weight
-        "gamma_n":        [1.0, 2.0, 3.0, 4.0],            # rejection gain weight
-        "offer_fraction": [0.40, 0.43, 0.45],               # share offered to responder
-        "delta":          [0.4, 0.6],                       # discount factor (from paper)
-    }
-
-    combos = list(itertools.product(*grid.values()))
-    print(f"Grid search: {len(combos)} combinations × {N_TRIALS} trials each")
-    print(f"Targets  →  R1={TARGETS['round_dist'][1]:.1%}  "
-          f"R2={TARGETS['round_dist'][2]:.1%}  "
-          f"R3={TARGETS['round_dist'][3]:.1%}  "
-          f"acc={TARGETS['acceptance_rate']:.1%}")
-    print()
+    print(f"\n{'─'*60}")
+    print(f"Target: {target['label']}")
+    print(f"  R1={target['round_dist'][1]:.1%}  "
+          f"R2={target['round_dist'][2]:.1%}  "
+          f"R3={target['round_dist'][3]:.1%}  "
+          f"acc={target['acceptance_rate']:.1%}")
+    print(f"Grid: {len(combos)} combinations × {N_TRIALS} trials")
 
     records = []
-    for i, (rt, eps, gy, gn, m, d) in enumerate(combos):
-        mse, sim_dist, sim_acc = score(rt, eps, gy, gn, m, d)
-        records.append((mse, rt, eps, gy, gn, m, d, sim_dist, sim_acc))
-        if (i + 1) % 200 == 0:
+    for i, vals in enumerate(combos):
+        params = dict(zip(keys, vals))
+        mse, sim_dist, sim_acc = _score(**params, target=target)
+        records.append((mse, params, sim_dist, sim_acc))
+        if (i + 1) % 400 == 0:
             print(f"  {i + 1}/{len(combos)} evaluated …")
 
     records.sort(key=lambda x: x[0])
     return records
 
 
-def report(records, top_n=5):
-    print(f"\n{'=' * 65}")
-    print(f"Top {top_n} parameter fits  (Ochs & Roth 1989)")
-    print(f"{'=' * 65}")
-    for rank, (mse, rt, eps, gy, gn, m, d, sim_dist, sim_acc) in enumerate(records[:top_n], 1):
-        print(f"\n#{rank}  MSE = {mse:.6f}")
-        print(f"     rt={rt}  epsilon={eps}  gamma_y={gy}  gamma_n={gn}")
-        print(f"     offer_fraction={m}  delta={d}")
-        print(f"     Simulated → R1={sim_dist.get(1, 0):.1%}  "
-              f"R2={sim_dist.get(2, 0):.1%}  "
-              f"R3={sim_dist.get(3, 0):.1%}  "
+def _report(records: list, top_n: int = 3) -> dict:
+    print(f"\nTop {top_n} fits:")
+    for rank, (mse, params, sim_dist, sim_acc) in enumerate(records[:top_n], 1):
+        print(f"  #{rank}  MSE={mse:.5f}  →  "
+              f"R1={sim_dist.get(1,0):.1%}  "
+              f"R2={sim_dist.get(2,0):.1%}  "
+              f"R3={sim_dist.get(3,0):.1%}  "
               f"acc={sim_acc:.1%}")
+        print(f"       {params}")
+    return records[0][1]  # return best params dict
 
-    _, rt, eps, gy, gn, m, d, _, _ = records[0]
-    print(f"\n{'=' * 65}")
-    print("Best-fit parameters — copy into simulate_chemical() defaults:")
-    print(f"{'=' * 65}")
-    print(f"  rt={rt}, epsilon={eps}, gamma_y={gy}, gamma_n={gn},")
-    print(f"  offer_fraction={m}, delta={d}")
 
+# ── Main ───────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    records = grid_search()
-    report(records)
+    best_classical = _report(_search("classical"), top_n=3)
+    best_empirical = _report(_search("empirical"), top_n=3)
+
+    print(f"\n{'='*60}")
+    print("Copy these into models.py:")
+    print(f"{'='*60}")
+    print(f"\nCGT_CLASSICAL_PARAMS = {best_classical}")
+    print(f"\nCGT_EMPIRICAL_PARAMS = {best_empirical}")

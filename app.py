@@ -1,3 +1,10 @@
+"""
+Bar chart comparing ending-round distributions across three scenarios:
+  1. Classical            — rational benchmark (always Round 1)
+  2. CGT (classical fit)  — CGT tuned to reproduce classical equilibrium
+  3. CGT (empirical fit)  — CGT tuned to match Ochs & Roth (1989) lab data
+"""
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -5,7 +12,7 @@ from models import MAX_ROUNDS
 from simulation import run_all
 
 ROUND_LABELS = [f"Round {r}" for r in range(1, MAX_ROUNDS + 1)]
-COLORS = ["#4C72B0", "#55A868"]  # Classical, CGT
+COLORS = ["#4C72B0", "#8172B3", "#55A868"]  # Classical, CGT classical fit, CGT empirical fit
 
 
 def plot_round_distributions(summaries=None, save_path: str | None = None) -> None:
@@ -15,7 +22,7 @@ def plot_round_distributions(summaries=None, save_path: str | None = None) -> No
     x = np.arange(len(ROUND_LABELS))
     width = 0.25
 
-    fig, ax = plt.subplots(figsize=(9, 5))
+    fig, ax = plt.subplots(figsize=(10, 5))
 
     for idx, summary in enumerate(summaries.values()):
         heights = [summary.round_distribution.get(r, 0.0) for r in range(1, MAX_ROUNDS + 1)]
@@ -30,10 +37,10 @@ def plot_round_distributions(summaries=None, save_path: str | None = None) -> No
 
     ax.set_xlabel("Round where the game ended")
     ax.set_ylabel("Share of trials")
-    ax.set_title("Rubinstein Ultimatum Game: Ending Round by Model")
+    ax.set_title("Rubinstein Ultimatum Game: Classical vs. CGT (two calibrations)")
     ax.set_xticks(x)
     ax.set_xticklabels(ROUND_LABELS)
-    ax.set_ylim(0, 1.05)
+    ax.set_ylim(0, 1.15)
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
 
